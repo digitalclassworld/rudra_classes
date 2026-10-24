@@ -1,7 +1,7 @@
 name: "Build iOS Testable IPA"
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
   push:
     branches: [ main, master ]
   pull_request:
@@ -10,7 +10,7 @@ on:
 jobs:
   build-ios:
     name: Build Testable iOS IPA
-    runs-on: macos-latest
+    runs-on: macos-14 # Uses Apple Silicon M1/M2 runners
 
     steps:
       - name: Checkout Repository
@@ -22,17 +22,18 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install Dependencies
-        run: flutter pub get
+      - name: Precache iOS Artifacts
+        run: flutter precache --ios
 
-      - name: Install CocoaPods & Pods
-        run: |
-          cd ios
-          pod install --repo-update
+      - name: Install Flutter Dependencies
+        run: flutter pub get
 
       - name: Build iOS Application (Unsigned / Testable)
         run: |
           flutter build ios --no-codesign --release
+
+      - name: Package into IPA
+        run: |
           cd build/ios/iphoneos
           mkdir -p Payload
           cp -r Runner.app Payload/
@@ -44,7 +45,7 @@ jobs:
           name: RudraClasses-iOS-Testable-IPA
           path: build/ios/iphoneos/RudraClasses-Testable.ipa
 
-      - name: Upload Runner.app (Simulator / Sideloading)
+      - name: Upload Runner.app
         uses: actions/upload-artifact@v4
         with:
           name: RudraClasses-iOS-Runner-App
