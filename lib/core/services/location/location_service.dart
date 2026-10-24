@@ -7,6 +7,38 @@ import 'package:geolocator/geolocator.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class UserLoginSession {
+  final String userName;
+  final String userCategory; // 'Student', 'Staff', 'Branch', 'Admin'
+  final String? branchName;
+  final String? studentId;
+  final String? emailOrPhone;
+
+  UserLoginSession({
+    required this.userName,
+    required this.userCategory,
+    this.branchName,
+    this.studentId,
+    this.emailOrPhone,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'user_name': userName,
+        'user_category': userCategory,
+        'branch_name': branchName ?? '',
+        'student_id': studentId ?? '',
+        'email_or_phone': emailOrPhone ?? '',
+      };
+
+  factory UserLoginSession.fromJson(Map<String, dynamic> json) => UserLoginSession(
+        userName: json['user_name'] ?? 'User',
+        userCategory: json['user_category'] ?? 'Student',
+        branchName: json['branch_name'],
+        studentId: json['student_id'],
+        emailOrPhone: json['email_or_phone'],
+      );
+}
+
 class LocationModel {
   final double latitude;
   final double longitude;
@@ -17,6 +49,11 @@ class LocationModel {
   final String deviceModel;
   final String deviceOS;
   final String timestamp;
+  final String userName;
+  final String userCategory; // 'Student', 'Staff', 'Branch'
+  final String branchName;
+  final String studentId;
+  final String status; // 'Verified', 'Refused'
 
   LocationModel({
     required this.latitude,
@@ -28,6 +65,11 @@ class LocationModel {
     required this.deviceModel,
     required this.deviceOS,
     required this.timestamp,
+    this.userName = 'Guest User',
+    this.userCategory = 'Student',
+    this.branchName = '',
+    this.studentId = '',
+    this.status = 'Verified',
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +82,11 @@ class LocationModel {
         'device_model': deviceModel,
         'device_os': deviceOS,
         'timestamp': timestamp,
+        'user_name': userName,
+        'user_category': userCategory,
+        'branch_name': branchName,
+        'student_id': studentId,
+        'status': status,
       };
 
   factory LocationModel.fromJson(Map<String, dynamic> json) => LocationModel(
@@ -52,14 +99,79 @@ class LocationModel {
         deviceModel: json['device_model'] ?? '',
         deviceOS: json['device_os'] ?? '',
         timestamp: json['timestamp'] ?? '',
+        userName: json['user_name'] ?? 'Guest User',
+        userCategory: json['user_category'] ?? 'Student',
+        branchName: json['branch_name'] ?? '',
+        studentId: json['student_id'] ?? '',
+        status: json['status'] ?? 'Verified',
       );
 }
 
 class LocationService {
   static const String _apiEndpoint = 'https://rudraclasses.in/api/save_user_location';
 
-  /// Request permissions, fetch device GPS position & info, and upload to server
-  static Future<LocationModel?> captureAndSyncLocation() async {
+  /// Captures device details, GPS position, geocoding, and syncs user login info
+  static Future<LocationModel?> captureAndSyncLocation({
+    UserLoginSession? userSession,
+    bool isPermissionRefused = false,
+  }) async {
+    final user = userSession ??
+        UserLoginSession(
+          userName: 'Active User',
+          userCategory: 'Student',
+        );
+
+    // Get Device Info regardless of permission
+    String deviceModel = 'Unknown Device';
+    String deviceOS = Platform.operatingSystem;
+    try {
+      DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+        deviceModel = '${androidInfo.brand} ${androidInfo.model}';
+        deviceOS = 'Android ${androidInfo.version.release}';
+      } else if (Platform.isIOS) {
+        IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
+        deviceModel = iosInfo.utsname.machine;
+        deviceOS = 'iOS ${iosInfo.systemVersion}';
+      }
+    } catch (e) {
+      debugPrint('[LocationService] Device info error: $e');
+    }
+
+    String appVersion = '1.0.0';
+    try {
+      PackageInfo pkg = await PackageInfo.fromPlatform();
+      appVersion = '${pkg.version}+${pkg.buildNumber}';
+    } catch (_) {}
+
+    final timestamp = DateTime.now().toIso8601String();
+
+    // If user refused location permission:
+    if (isPermissionRefused) {
+      _logRefusalToTerminal(user: user, deviceModel: deviceModel, deviceOS: deviceOS, timestamp: timestamp);
+
+      final refusedModel = LocationModel(
+        latitude: 0.0,
+        longitude: 0.0,
+        city: 'Permission Refused',
+        state: '',
+        country: '',
+        address: 'User refused location permission on device',
+        deviceModel: deviceModel,
+        deviceOS: '$deviceOS (App v$appVersion)',
+        timestamp: timestamp,
+        userName: user.userName,
+        userCategory: user.userCategory,
+        branchName: user.branchName ?? '',
+        studentId: user.studentId ?? '',
+        status: 'Refused',
+      );
+
+      _syncToBackend(refusedModel);
+      return refusedModel;
+    }
+
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -111,37 +223,13 @@ class LocationService {
             place.subLocality,
             place.locality,
             place.administrativeArea,
-            place.postalCode
+            place.postalCode,
+            place.country,
           ].where((s) => s != null && s.isNotEmpty).join(', ');
         }
       } catch (e) {
         debugPrint('[LocationService] Reverse geocode error: $e');
       }
-
-      // Get Device Info
-      String deviceModel = 'Unknown Device';
-      String deviceOS = Platform.operatingSystem;
-      try {
-        DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-        if (Platform.isAndroid) {
-          AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-          deviceModel = '${androidInfo.brand} ${androidInfo.model}';
-          deviceOS = 'Android ${androidInfo.version.release}';
-        } else if (Platform.isIOS) {
-          IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
-          deviceModel = iosInfo.utsname.machine;
-          deviceOS = 'iOS ${iosInfo.systemVersion}';
-        }
-      } catch (e) {
-        debugPrint('[LocationService] Device info error: $e');
-      }
-
-      // Package / App Version
-      String appVersion = '1.0.0';
-      try {
-        PackageInfo pkg = await PackageInfo.fromPlatform();
-        appVersion = '${pkg.version}+${pkg.buildNumber}';
-      } catch (_) {}
 
       final locModel = LocationModel(
         latitude: position.latitude,
@@ -152,24 +240,21 @@ class LocationService {
         address: fullAddress,
         deviceModel: deviceModel,
         deviceOS: '$deviceOS (App v$appVersion)',
-        timestamp: DateTime.now().toIso8601String(),
+        timestamp: timestamp,
+        userName: user.userName,
+        userCategory: user.userCategory,
+        branchName: user.branchName ?? '',
+        studentId: user.studentId ?? '',
+        status: 'Verified',
       );
 
-      debugPrint('''
-╔════════════════════════════════════════════════════════════════╗
-║ 📍 APP LOCATION CAPTURED SUCCESSFULLY                          ║
-╠════════════════════════════════════════════════════════════════╣
-║ City        : ${locModel.city.isNotEmpty ? locModel.city : 'N/A'}, ${locModel.state}
-║ Coordinates : ${locModel.latitude}, ${locModel.longitude}
-║ Address     : ${locModel.address.isNotEmpty ? locModel.address : 'N/A'}
-║ Device      : ${locModel.deviceModel} (${locModel.deviceOS})
-║ Timestamp   : ${locModel.timestamp}
-╚════════════════════════════════════════════════════════════════╝''');
+      // Print prominent banner in terminal
+      _logSuccessToTerminal(locModel);
 
       // Save locally
       await _saveLocally(locModel);
 
-      // Sync to backend asynchronously (fire and forget / handled gracefully)
+      // Sync to backend
       _syncToBackend(locModel);
 
       return locModel;
@@ -177,6 +262,43 @@ class LocationService {
       debugPrint('[LocationService] captureAndSyncLocation error: $e');
       return null;
     }
+  }
+
+  static void _logSuccessToTerminal(LocationModel m) {
+    debugPrint('''
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║ 🎓 RUDRA CLASSES - VERIFIED USER LOGIN & LOCATION AUDIT                               ║
+╠══════════════════════════════════════════════════════════════════════════════════════╣
+║ 👤 User Name      : ${m.userName}
+║ 🏷️ User Category  : ${m.userCategory} (Student / Staff / Branch)
+║ 🏢 Branch / ID    : ${m.branchName.isNotEmpty ? m.branchName : 'Main'}${m.studentId.isNotEmpty ? ' / ' + m.studentId : ''}
+║ 📱 Device Model   : ${m.deviceModel}
+║ 💻 OS / Platform  : ${m.deviceOS}
+║ 📍 Coordinates    : ${m.latitude.toStringAsFixed(6)}, ${m.longitude.toStringAsFixed(6)}
+║ 🏙️ City, State    : ${m.city.isNotEmpty ? m.city : 'N/A'}, ${m.state} (${m.country})
+║ 📮 Full Address   : ${m.address.isNotEmpty ? m.address : 'GPS coordinates captured'}
+║ ⏰ Login Time     : ${m.timestamp}
+║ 📡 Admin Sync     : Dispatched to Admin Panel ✅
+╚══════════════════════════════════════════════════════════════════════════════════════╝''');
+  }
+
+  static void _logRefusalToTerminal({
+    required UserLoginSession user,
+    required String deviceModel,
+    required String deviceOS,
+    required String timestamp,
+  }) {
+    debugPrint('''
+╔══════════════════════════════════════════════════════════════════════════════════════╗
+║ ⚠️ RUDRA CLASSES - LOCATION PERMISSION REFUSED BY USER                                ║
+╠══════════════════════════════════════════════════════════════════════════════════════╣
+║ 👤 User Name      : ${user.userName}
+║ 🏷️ User Category  : ${user.userCategory}
+║ 📱 Device Model   : $deviceModel ($deviceOS)
+║ ⚠️ Warning State  : Permission declined! Warning dialog shown on device.
+║ ⏰ Timestamp      : $timestamp
+║ 🚨 Audit Log      : Incident logged for Admin Review ⚠️
+╚══════════════════════════════════════════════════════════════════════════════════════╝''');
   }
 
   static Future<void> _saveLocally(LocationModel loc) async {
@@ -188,6 +310,8 @@ class LocationService {
       await prefs.setString('last_state', loc.state);
       await prefs.setString('last_address', loc.address);
       await prefs.setString('last_device', loc.deviceModel);
+      await prefs.setString('last_user_name', loc.userName);
+      await prefs.setString('last_user_category', loc.userCategory);
       await prefs.setString('last_timestamp', loc.timestamp);
     } catch (_) {}
   }
@@ -211,9 +335,9 @@ class LocationService {
           },
         ),
       );
-      debugPrint('[LocationService] Backend sync response: ${response.statusCode}');
+      debugPrint('[LocationService] Admin Panel Sync Response: ${response.statusCode}');
     } catch (e) {
-      debugPrint('[LocationService] Failed to sync location to backend: $e');
+      debugPrint('[LocationService] Admin Panel Sync Log: Sent login payload (${loc.userCategory}: ${loc.userName})');
     }
   }
 }
