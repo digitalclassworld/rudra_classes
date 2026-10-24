@@ -1,6 +1,4 @@
-import 'dart:convert';
 import 'dart:io';
-import 'package:flutter_dynamic_icon_plus/flutter_dynamic_icon_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
@@ -59,14 +57,7 @@ class DynamicAppIconManager {
 
   /// Set app icon (iOS + Android)
   static Future<void> setAppIcon({required String iconName}) async {
-    try {
-      if (await FlutterDynamicIconPlus.supportsAlternateIcons) {
-        await FlutterDynamicIconPlus.setAlternateIconName(iconName: iconName);
-        print("Icon set: $iconName");
-      }
-    } catch (e) {
-      print("Failed to set icon: $e");
-    }
+    // Dynamic icon switching is disabled
   }
 
   /// Initialize at app launch
