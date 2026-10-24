@@ -10,7 +10,7 @@ on:
 jobs:
   build-ios:
     name: Build Testable iOS IPA
-    runs-on: macos-14 # Uses Apple Silicon M1/M2 runners
+    runs-on: macos-14 # Uses Apple Silicon M-series runners
 
     steps:
       - name: Checkout Repository
@@ -21,6 +21,9 @@ jobs:
         with:
           channel: 'stable'
           cache: true
+
+      - name: Disable Swift Package Manager (Force CocoaPods)
+        run: flutter config --no-enable-swift-package-manager
 
       - name: Precache iOS Artifacts
         run: flutter precache --ios
