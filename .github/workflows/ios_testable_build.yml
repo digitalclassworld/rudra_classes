@@ -1,0 +1,51 @@
+name: "Build iOS Testable IPA"
+
+on:
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-ios:
+    name: Build Testable iOS IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods & Pods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build iOS Application (Unsigned / Testable)
+        run: |
+          flutter build ios --no-codesign --release
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r RudraClasses-Testable.ipa Payload
+
+      - name: Upload Testable IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RudraClasses-iOS-Testable-IPA
+          path: build/ios/iphoneos/RudraClasses-Testable.ipa
+
+      - name: Upload Runner.app (Simulator / Sideloading)
+        uses: actions/upload-artifact@v4
+        with:
+          name: RudraClasses-iOS-Runner-App
+          path: build/ios/iphoneos/Runner.app

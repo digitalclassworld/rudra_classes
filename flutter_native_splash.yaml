@@ -1,0 +1,7 @@
+flutter_native_splash:
+  color: "#ffffff"
+  background_image: "assets/images/rudra_classes_splash.png"
+  fullscreen: true
+  android_12:
+    color: "#ffffff"
+    image: "assets/images/rudra_classes_android12.png"
