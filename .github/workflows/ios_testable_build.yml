@@ -31,9 +31,34 @@ jobs:
       - name: Install Flutter Dependencies
         run: flutter pub get
 
+      - name: Cache CocoaPods Specs & Pods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
       - name: Build iOS Application (Unsigned / Testable)
         run: |
-          flutter build ios --no-codesign --release
+          set -o pipefail
+          echo "Starting iOS build without code signing..."
+          # Filter out CocoaPods CDN lines so real compilation output and errors are immediately visible
+          flutter build ios --no-codesign --release 2>&1 | tee build_ios.log | grep -v "CDN: trunk" || {
+            echo "❌ BUILD FAILED! Last 100 lines of build log:"
+            tail -n 100 build_ios.log
+            exit 1
+          }
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-build-ios-log
+          path: build_ios.log
 
       - name: Package into IPA
         run: |
